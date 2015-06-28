@@ -5,26 +5,36 @@ import time
 from threading import Thread
 
 
-def price(instrument_string, account_id, access_token, domain):
+class TradeInfo:
 
-    instrument_string.replace(',', '%2C')#url only accepts %2C
+   def __init__(self, domain, access_token, account_id, instrument_string, granularity):
+      self.domain = domain
+      self.access_token = access_token
+      self.account_id = account_id
+      self.instrument_string = instrument_string
+      self.granularity = granularity
+
+
+def price(TradeInfo):
+
+    instrument_string = TradeInfo.instrument_string.replace(',', '%2C')#url only accepts %2C
     
-    endpoint = 'https://api-' + domain + '/v1/prices?accountId=' + account_id + '&instruments=' + instrument_string
-    query_params = { 'Authorization': 'Bearer ' + access_token   }
+    endpoint = 'https://api-' + TradeInfo.domain + '/v1/prices?accountId=' + TradeInfo.account_id + '&instruments=' + instrument_string
+    query_params = { 'Authorization': 'Bearer ' + TradeInfo.access_token   }
     
     req = request.Request(endpoint, headers = query_params)
     response = request.urlopen(req)
     
     #print(response.read().decode('utf-8'))
-    return response
+    return response.read().decode('utf-8')
 
     
 
-def price_stream(instrument_string, account_id, access_token, domain):
+def priceStream(TradeInfo):
 
-    instrument_string.replace(',', '%2C')    
-    endpoint = 'https://stream-' + domain + '/v1/prices?accountId=' + account_id + '&instruments=' + instrument_string
-    query_params = { 'Authorization': 'Bearer ' + access_token   }
+    instrument_string = TradeInfo.instrument_string.replace(',', '%2C')    
+    endpoint = 'https://stream-' + TradeInfo.domain + '/v1/prices?accountId=' + TradeInfo.account_id + '&instruments=' + instrument_string
+    query_params = { 'Authorization': 'Bearer ' + TradeInfo.access_token   }
 
     
     req = request.Request(endpoint, headers = query_params)
@@ -36,16 +46,16 @@ def price_stream(instrument_string, account_id, access_token, domain):
         
 
 
-def priceHistory_byStart(start, instrument_string, account_id, access_token, domain, granularity = 'S5'):
+def priceHistoryStart(start, TradeInfo):
 
-    endpoint = 'https://api-' + domain + '/v1/candles'\
-                + '?instrument=' + instrument_string\
+    endpoint = 'https://api-' + TradeInfo.domain + '/v1/candles'\
+                + '?instrument=' + TradeInfo.instrument_string\
                 + '&count=5000'\
-                + '&granularity=' + granularity\
+                + '&granularity=' + TradeInfo.granularity\
                 + '&start=' + start\
                 + '&include_First=False'             
 
-    query_params = { 'Authorization': 'Bearer ' + access_token }
+    query_params = { 'Authorization': 'Bearer ' + TradeInfo.access_token }
 
     req = request.Request(endpoint, headers = query_params)
     print("Downloading 5000 candlesticks starting starting from: " + start.replace("%3A", ":"))
@@ -55,16 +65,16 @@ def priceHistory_byStart(start, instrument_string, account_id, access_token, dom
 
     return data
 
-def priceHistory_byCount(instrument_string, account_id, access_token, domain, granularity = 'S5', count = '1000'):
+def priceHistoryCount(TradeInfo, count = '1000'):
 
-    endpoint = 'https://api-' + domain + '/v1/candles'\
-                + '?instrument=' + instrument_string\
+    endpoint = 'https://api-' + TradeInfo.domain + '/v1/candles'\
+                + '?instrument=' + TradeInfo.instrument_string\
                 + '&count=' + count\
-                + '&granularity=' + granularity
+                + '&granularity=' + TradeInfo.granularity
 
             
 
-    query_params = { 'Authorization': 'Bearer ' + access_token }
+    query_params = { 'Authorization': 'Bearer ' + TradeInfo.access_token }
 
     req = request.Request(endpoint, headers = query_params)
     print(req.get_full_url())
@@ -78,7 +88,7 @@ def priceHistory_byCount(instrument_string, account_id, access_token, domain, gr
 
         
 
-def update_price_history(instrument_string, account_id, access_token, domain, granularity = 'S5'):
+def updatePriceHistory(TradeInfo):
 
     try:
         with open(instrument_string + '-' + granularity + '.txt') as data_file:
@@ -135,24 +145,25 @@ def update_price_history(instrument_string, account_id, access_token, domain, gr
     
 def main():
 
-    domain = 'fxpractice.oanda.com'
-    access_token = '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6'
-    account_id = '3566119'
-    instrument_string = "EUR_USD"
+    tradeInfo =  TradeInfo('fxpractice.oanda.com',\
+                           '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
+                           '3566119', "EUR_USD", 'S5')
+    #domain, access_token, account_id, instrument_string, granularity
 
         
-    #data = price_history("2009-01-10T00%3A00%3A00", instrument_string, account_id, access_token, domain)
-    #update_price_history(instrument_string, account_id, access_token, domain)
+    #data = priceHistory("2009-01-10T00%3A00%3A00", tradeInfo)
+    #updatePriceHistory(TradeInfo)
 
     
-    #thread1 = Thread(target = price_stream, args = (instrument_string, account_id, access_token, domain))
+    #thread1 = Thread(target = priceStream, args = (tradeInfo))
     #thread2 = Thread(target = hello)
     #thread1.start()
 
-    while(True):
-        for line in price(instrument_string, account_id, access_token, domain):
-            print(line.decode('utf-8'))
+    while(True):        
+        info = (priceHistoryCount(tradeInfo, count = '1'))
+        
         time.sleep(0.5)
+        print(info)
 
 
     #thread2.start()
@@ -160,7 +171,7 @@ def main():
 
 
     #while(True):
-        #price(instrument_string, account_id, access_token, domain)
+        #price(tradeInfo)
         #time.sleep(1)
 
 
