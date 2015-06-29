@@ -7,6 +7,7 @@ from threading import Thread
 from pricedownloader import priceStream, priceHistoryCount, requestPrice
 import winsound
 
+#things to work on: stop loss, trailing stop loss, close all trades then close trading system
 
 class EventQueue: #required to guarantee that ticks are used sequentially
    def __init__(self):
@@ -44,18 +45,30 @@ def signalGenerator(tradeInfo, priceClass, eventQueue):
 
 
 
-         if(sma20 - sma50 > 0.1*sma50 and previous_sma20 - previous_sma50 <= 0.1*sma50):
-            #trade only when sma's crossover by a significant amount (arbirtrary 0.1)
+         if(sma20 - sma50 > 0.00005 and previous_sma20 - previous_sma50 <= 0.00005):
+            #trade only when sma's crossover by a significant amount (arbitrary 0.5 pips)
             
             orderRequest(tradeInfo, 'buy', 100000)
             print("Bought 1 unit of EUR_USD")
             print(new_tick, '     ', "sma20 = ", sma20, '    ', "sma50 = ", sma50)     
             winsound.Beep(300,500)
+
+         elif(sma20 - sma50 < 0 and previous_sma20 - previous_sma50 >= 0):
+            closeTrades(tradeInfo)
+            print("Closed all units of EUR_USD")
+            print(new_tick, '     ', "sma20 = ", sma20, '    ', "sma50 = ", sma50)
+            winsound.Beep(300,500)
             
 
-         elif(sma20 - sma50 < 0.1*sma50 and previous_sma20 - previous_sma50 >= 0.1*sma50):
+         elif(sma20 - sma50 < -0.00005 and previous_sma20 - previous_sma50 >= -0.00005):
             orderRequest(tradeInfo, 'sell', 100000)
             print("Sold 1 unit of EUR_USD")
+            print(new_tick, '     ', "sma20 = ", sma20, '    ', "sma50 = ", sma50)
+            winsound.Beep(300,500)
+
+         elif(sma20 - sma50 > 0 and previous_sma20 - previous_sma50 <= 0):
+            closeTrades(tradeInfo)
+            print("Closed all units of EUR_USD")
             print(new_tick, '     ', "sma20 = ", sma20, '    ', "sma50 = ", sma50)
             winsound.Beep(300,500)
 
@@ -73,11 +86,9 @@ def signalGenerator(tradeInfo, priceClass, eventQueue):
 
 def orderRequest(tradeInfo, buy_or_sell, units):
 
-   instrument_string = tradeInfo.instrument_string.replace(',', '%2C')#url only accepts %2C
-    
    endpoint = 'https://api-' + tradeInfo.domain + '/v1/accounts/' + tradeInfo.account_id + '/orders'
 
-   order_data = {'instrument': instrument_string, \
+   order_data = {'instrument': tradeInfo.instrument_string, \
               'units': str(units), 'side': buy_or_sell, 'type': 'market'}
 
    order_data = parse.urlencode(order_data)
@@ -93,6 +104,47 @@ def orderRequest(tradeInfo, buy_or_sell, units):
       
    print(response.read().decode('utf-8'))
    print()
+
+def openTrades(tradeInfo):
+   '''
+   Obtain dictionary description of all open trades specified in tradeInfo
+   '''
+
+   endpoint = 'https://api-' + tradeInfo.domain + '/v1/accounts/'\
+              + tradeInfo.account_id + '/trades?instrument=' + tradeInfo.instrument_string
+
+
+   query_params = { 'Authorization': 'Bearer ' + tradeInfo.access_token   }
+
+   req = request.Request(endpoint, headers = query_params)
+   response = request.urlopen(req)
+
+   #print(response.read().decode('utf-8'))
+   return json.loads(response.read().decode('utf-8'))
+
+
+def closeTrades(tradeInfo):
+   '''
+   Close all trades of instrument specified in tradeInfo
+   '''
+#https://gist.github.com/kaito834/af2ad953e3f47a6fde42 how to DELETE with urllib
+   open_trades = openTrades(tradeInfo)['trades']
+
+   for index in range(len(open_trades)):
+   
+      endpoint = 'https://api-' + tradeInfo.domain + '/v1/accounts/'\
+                 + tradeInfo.account_id + '/trades/' + str(open_trades[index]['id'])
+      
+      query_params = { 'Authorization': 'Bearer ' + tradeInfo.access_token   }
+
+         
+      req = request.Request(endpoint, headers = query_params, method='DELETE')
+      response = request.urlopen(req)
+         
+      print(response.read().decode('utf-8'))
+      print()
+
+
 
 
       
@@ -168,8 +220,8 @@ class TradeInfo:
 
 class TimeIncrement:
    '''
-   Used to incremenet time to determine what the next candlestick should be in the
-   candleUpdater method in Prices class
+   Used to incremenet time to determine what the next candlestick should
+   be in the candleUpdater method in Prices class
    '''
    
    def __init__(self):
@@ -190,7 +242,6 @@ eventQueue = EventQueue()
 tradeInfo =  TradeInfo('fxpractice.oanda.com',\
                        '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
                        '3566119', 'EUR_USD', 'S5')
-
 
 thread1 = Thread(target = priceClass.candleUpdater, args = (tradeInfo,))
 thread2 = Thread(target = priceClass.currentPrice, args = (tradeInfo, priceClass, eventQueue))
