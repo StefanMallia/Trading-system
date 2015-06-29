@@ -15,7 +15,7 @@ class TradeInfo:
       self.granularity = granularity
 
 
-def price(TradeInfo):
+def requestPrice(TradeInfo):
 
     instrument_string = TradeInfo.instrument_string.replace(',', '%2C')#url only accepts %2C
     

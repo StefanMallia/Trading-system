@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 from dateutil.relativedelta import relativedelta as rd
 from threading import Thread
-from pricedownloader import priceStream, priceHistoryCount
+from pricedownloader import priceStream, priceHistoryCount, requestPrice
 
 class EventQueue:
    '''
@@ -14,12 +14,72 @@ class EventQueue:
       self.queue = []
       
    def enqueue(self, item):
-      queue.append(item)
+      self.queue.append(item)
+      print(item, "enqueued")
 
-   def dequeue(self):
-      queue.pop(0)
+   def dequeue(self, item):
+      self.queue.pop(self.queue.index(item))
+      print(item, "Dequeued")
 
 
+def signalGenerator(priceClass, eventQueue):
+   
+
+   while(True):
+      if('New Candle' in eventQueue.queue):
+         eventQueue.dequeue('New Candle')
+         
+         sma50 = (priceClass.current_askPrice + sum(priceClass.askPrices[0:49]))/50
+         sma20 = (priceClass.current_askPrice + sum(priceClass.askPrices[0:19]))/20
+
+         previous_sma50 = sum(priceClass.askPrices[0:50])/50
+         previous_sma20 = sum(priceClass.askPrices[0:20])/20
+         
+         if(sma20 > sma50 and previous_sma20 <= previous_sma50):
+            eventQueue.append('Buy')
+         elif(sma20 < sma50 and previous_sma20 >= previous_sma50):
+            eventQueue.append('Sell')
+      time.sleep(2)
+
+
+def orderRequest(tradeInfo, eventQueue):
+
+   instrument_string = tradeInfo.instrument_string.replace(',', '%2C')#url only accepts %2C
+    
+   buy_endpoint = 'https://api-' + tradeInfo.domain + '/v1/accounts/' + tradeInfo.account_id + '/orders?instrument=' + instrument_string + \
+              '&units=2&side=buy&type=market'
+   sell_endpoint = 'https://api-' + tradeInfo.domain + '/v1/accounts/' + tradeInfo.account_id + '/orders?instrument=' + instrument_string + \
+              '&units=2&side=sell&type=market'
+   
+   query_params = { 'Authorization': 'Bearer ' + tradeInfo.access_token   }
+
+    
+
+
+   while(True):
+      if('Buy' in eventQueue.queue):
+         eventQueue.dequeue('Buy')
+         
+##         req = request.Request(buy_endpoint, headers = query_params)
+##         response = request.urlopen(req)
+##          
+##         print(response.read().decode('utf-8'))
+         #return response.read().decode('utf-8')
+
+      elif('Sell' in eventQueue.queue):
+         eventQueue.dequeue('Sell')
+         
+##         req = request.Request(sell_endpoint, headers = query_params)
+##         response = request.urlopen(req)
+##          
+##         print(response.read().decode('utf-8'))
+         #return response.read().decode('utf-8')
+         
+      time.sleep(2)
+         
+         
+
+      
 class Prices:
 
    '''
@@ -27,27 +87,33 @@ class Prices:
    '''
 
    def __init__(self):
-      self.bidPrices = []
       self.askPrices = []
+      self.bidPrices = []
       self.candle_time = []
 
       
-   def candleUpdater(self, TradeInfo):
-      self.data = priceHistory_byCount(TradeInfo, count = '100')['candles']
+   def candleUpdater(self, tradeInfo, eventQueue):
+      self.data = priceHistoryCount(tradeInfo, count = '100')['candles']
 
-      for line in data:
-         self.askPrices.append(self.data['closeAsk'])
-         self.bidPrices.append(self.data['closeBid'])
-         self.candle_time.append(self.data['time'])
+      for line in self.data:
+         self.askPrices.append(line['closeAsk'])
+         self.bidPrices.append(line['closeBid'])
+         self.candle_time.append(line['time'])
+
+      eventQueue.enqueue('New Candle')
          
 
-      timeformat = '%Y-%m-%dT%H:%M:%S:%fZ'
-      time_increment = TimeIncrement().relativedelta[TradeInfo.granularity]
+      timeformat = '%Y-%m-%dT%H:%M:%S.%fZ'
+      time_increment = TimeIncrement().relativedelta[tradeInfo.granularity]
       
-      next_candle_time = datetime.strptime(data['time'][-1], timeformat) + time_increment
+      next_candle_time = datetime.strptime(self.data[-1]['time'], timeformat) + time_increment
+
       
       while(True):
-         time.sleep(next_candle_time - datetime.now()) #sleep until next candlestick is available
+
+         current_time = datetime.strptime(json.loads(requestPrice(tradeInfo))['prices'][0]['time'], timeformat)
+         
+         time.sleep((next_candle_time - current_time).total_seconds()) #sleep until next candlestick is available
          self.data.append(priceHistory_byCount(TradeInfo, count = '1')['candles'])
          
          if(self.data[-1] != self.data[-2]):
@@ -56,14 +122,18 @@ class Prices:
             self.askPrices.append(self.data['closeAsk'])
             self.bidPrices.append(self.data['closeBid'])
             self.candle_time.append(self.data['time'])
+            eventQueue.enqueue('New Candle')
 
 
-   def currentPrice(self, priceClass, TradeInfo):
-      self.response = priceStream(TradeInfo)
+   def currentPrice(self, priceClass, tradeInfo):
+      self.response = priceStream(tradeInfo)
    
       for line in self.response:
-         self.current_askPrice = json.loads(line.decode('utf-8'))['ask']
-         self.current_bidPrice = json.loads(line.decode('utf-8'))['bid']
+         line = json.loads(line.decode('utf-8'))
+         if 'tick' in line:
+            self.current_askPrice = line['tick']['ask']
+            self.current_bidPrice = line['tick']['bid']
+         
          
          
          
@@ -92,29 +162,22 @@ class TimeIncrement:
          'M': rd(months = 1)}   
                
 
-
-def signalGenerator(instrument_string, account_id, access_token, domain, granularity = 'S5'):
-   
-    
-   #thread1 = Thread(target = price_stream, args = (instrument_string, account_id, access_token, domain))
-   #thread2 = Thread(target = hello)
-   #thread1.start()
-   #thread2.start()
-           
-   stream = price_stream(instrument_string, account_id, access_token, domain)
-   for line in stream:
-      #current_askPrice = json.loads(line.decode('utf-8'))['tick']['ask']
-      #current_bidPrice = json.loads(line.decode('utf-8'))['tick']['bid']
-      print(line)
-
-   print("hello")
-
-
-
+eventQueue = EventQueue()
+priceClass = Prices()
 tradeInfo =  TradeInfo('fxpractice.oanda.com',\
                        '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
-                       '3566119', "EUR_USD", 'S5')
+                       '3566119', "EUR_USD", 'H1')
+
+thread1 = Thread(target = priceClass.candleUpdater, args = (tradeInfo, eventQueue))
+thread2 = Thread(target = priceClass.currentPrice, args = (priceClass, tradeInfo))
+thread3 = Thread(target = signalGenerator, args = (priceClass, eventQueue))
+thread4 = Thread(target = orderRequest, args = (tradeInfo, eventQueue))
 
 
-signal_generator(instrument_string, account_id, access_token, domain)    
+
+thread1.start()
+thread2.start()
+thread3.start()
+thread4.start()
+ 
     
