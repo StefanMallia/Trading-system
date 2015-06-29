@@ -7,67 +7,66 @@ from threading import Thread
 from pricedownloader import priceStream, priceHistoryCount, requestPrice
 import winsound
 
-class NewTickBool:
-   def __init__(self):
-      self.isNewTick = False
-   def newTick(self):
-      self.isNewTick = True
-   def resetBool(self):
-      self.isNewTick = False
 
-class EventQueue:
+class EventQueue: #required to guarantee that ticks are used sequentially
    def __init__(self):
       self.queue = []
    def enqueue(self, item):
       self.queue.append(item)
-   def dequeue(self,item):
+      #print('Enqueued: ', item)
+   def dequeue(self):
+      #print('Dequeued: ', self.queue[0])
       self.queue.pop(0)
+      
 
 
-def signalGenerator(tradeInfo, priceClass, newTickBool):
+def signalGenerator(tradeInfo, priceClass, eventQueue):
    #should implement mid prices  
+
+   while(True):#init values
+      if(eventQueue.queue):
+         previous_sma20 = (eventQueue.queue[0]['ask'] + sum(priceClass.askPrices[-19:]))/20 
+         previous_sma50 = (eventQueue.queue[0]['ask'] + sum(priceClass.askPrices[-49:]))/50
+         eventQueue.dequeue()
+         break
+      time.sleep(0.2)
+   
    
    while(True):
-      if(newTickBool.isNewTick == True):
-      
-         sma50 = (priceClass.current_askPrice + sum(priceClass.askPrices[-49:]))/50
-         sma20 = (priceClass.current_askPrice + sum(priceClass.askPrices[-19:]))/20
+      if(eventQueue.queue):
 
-         previous_sma50 = (priceClass.previous_askPrice + sum(priceClass.askPrices[-49:]))/50
-         previous_sma20 = (priceClass.previous_askPrice + sum(priceClass.askPrices[-19:]))/20
+         new_tick = eventQueue.queue[0]['ask']
+         eventQueue.dequeue()
 
-         
-         
-         print(priceClass.previous_askPrice, '    ', "Previous_sma20 = ", previous_sma20, '    ', "Previous_sma50 = ", previous_sma50, previous_sma20>previous_sma50)
-         print(priceClass.current_askPrice, '    ', "sma20 = ", sma20, '    ', "sma50 = ", sma50, sma20 > sma50)
-         print()
-         print()
-         print()
+         sma20 = (new_tick + sum(priceClass.askPrices[-19:]))/20         
+         sma50 = (new_tick + sum(priceClass.askPrices[-49:]))/50
 
-         #print("sma20 = ", sma20, '        ', "previous_sma20 = ", previous_sma20)
-         #print("sma50 = ", sma50, '        ', "previous_sma50 = ", previous_sma50)
-         #print()
-         #print()
-         
-         if(sma20 > sma50 and previous_sma20 <= previous_sma50):
-            #orderRequest(tradeInfo, 'buy', 1)
+
+
+
+         if(sma20 - sma50 > 0.1*sma50 and previous_sma20 - previous_sma50 <= 0.1*sma50):
+            #trade only when sma's crossover by a significant amount (arbirtrary 0.1)
+            
+            orderRequest(tradeInfo, 'buy', 100000)
             print("Bought 1 unit of EUR_USD")
+            print(new_tick, '     ', "sma20 = ", sma20, '    ', "sma50 = ", sma50)     
             winsound.Beep(300,500)
+            
 
-         elif(sma20 < sma50 and previous_sma20 >= previous_sma50):
-            #orderRequest(tradeInfo, 'sell', 1)
+         elif(sma20 - sma50 < 0.1*sma50 and previous_sma20 - previous_sma50 >= 0.1*sma50):
+            orderRequest(tradeInfo, 'sell', 100000)
             print("Sold 1 unit of EUR_USD")
+            print(new_tick, '     ', "sma20 = ", sma20, '    ', "sma50 = ", sma50)
             winsound.Beep(300,500)
 
-         newTickBool.resetBool()
-      #time.sleep(0.2)
-         
-      
 
-##         print("previous_askPrice", previous_askPrice)
-##         print("current_askPrice", priceClass.current_askPrice)
-##         print()
+            
+
+         previous_sma20 = sma20
+         previous_sma50 = sma50
          
+         
+      time.sleep(0.2)      
 
          
 
@@ -91,19 +90,16 @@ def orderRequest(tradeInfo, buy_or_sell, units):
          
    req = request.Request(endpoint, data = order_data, headers = query_params)
    response = request.urlopen(req)
-          
+      
    print(response.read().decode('utf-8'))
-   #return response.read().decode('utf-8')
+   print()
 
-         
-         
-         
 
       
 class Prices:
 
    '''
-   Stores historical prices and keeps track of current price
+   Stores historical prices and keeps track of current price (which are sent to EventQueue as ticks)
    '''
 
    def __init__(self):
@@ -113,14 +109,13 @@ class Prices:
 
       
    def candleUpdater(self, tradeInfo):
-      self.data = priceHistoryCount(tradeInfo, count = '100')['candles']
+      self.data = priceHistoryCount(tradeInfo, count = '101')['candles'][:101]#ommit last candle as it would not have closed yet
 
-      for line in self.data:
+      for line in self.data:#append one candle at a time, newer candles are at end of list
          self.askPrices.append(line['closeAsk'])
          self.bidPrices.append(line['closeBid'])
          self.candle_time.append(line['time'])
-
-  
+         
 
       timeformat = '%Y-%m-%dT%H:%M:%S.%fZ'
       time_increment = TimeIncrement().relativedelta[tradeInfo.granularity]
@@ -131,14 +126,12 @@ class Prices:
       while(True):
 
          current_time = datetime.utcnow()#price times are in utc
-         #print("Current time: ", current_time)
-         #print("Next candle time: ", next_candle_time)
          time_to_next_candle = (next_candle_time - current_time).total_seconds()
 
          if(time_to_next_candle > 0):
             time.sleep(time_to_next_candle) #sleep until next candlestick is available
             
-         self.data.append(priceHistoryCount(tradeInfo, count = '1')['candles'][0])
+         self.data.append(priceHistoryCount(tradeInfo, count = '2')['candles'][0])#load two candles and use first because second one has not closed yet
          
          
          if(self.data[-1] != self.data[-2]):
@@ -150,29 +143,20 @@ class Prices:
 
 
 
-   def currentPrice(self, tradeInfo, priceClass, newTickBool):
+   def currentPrice(self, tradeInfo, priceClass, eventQueue):
       self.response = priceStream(tradeInfo)
-
-      init_current_price = requestPrice(tradeInfo)
-      
-      self.current_askPrice = init_current_price['prices'][0]['ask']
-      self.current_bidPrice = init_current_price['prices'][0]['bid']
    
       for line in self.response:
          line = json.loads(line.decode('utf-8'))
          if 'tick' in line:
-            self.previous_askPrice = self.current_askPrice
-            self.previous_bidPrice = self.current_bidPrice
-            self.current_askPrice = line['tick']['ask']
-            self.current_bidPrice = line['tick']['bid']
-            newTickBool.newTick()
-           
-         
-         
-         
-         
+            eventQueue.enqueue({'ask': line['tick']['ask'], 'bid': line['tick']['bid'], 'time': line['tick']['time']})
+            
+     
 
 class TradeInfo:
+   '''
+   Account info, security to be traded, and granularity
+   '''
 
    def __init__(self, domain, access_token, account_id, instrument_string, granularity):
       self.domain = domain
@@ -183,7 +167,11 @@ class TradeInfo:
 
 
 class TimeIncrement:
-
+   '''
+   Used to incremenet time to determine what the next candlestick should be in the
+   candleUpdater method in Prices class
+   '''
+   
    def __init__(self):
       self.relativedelta = {\
          'S5': rd(seconds = 5), 'S10': rd(seconds = 10), 'S15': rd(seconds = 15),\
@@ -198,24 +186,19 @@ class TimeIncrement:
 
 
 priceClass = Prices()
-newTickBool = NewTickBool()
+eventQueue = EventQueue()
 tradeInfo =  TradeInfo('fxpractice.oanda.com',\
                        '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
                        '3566119', 'EUR_USD', 'S5')
 
 
-
-
-thread1 = Thread(target = priceClass.currentPrice, args = (tradeInfo, priceClass, newTickBool))
-thread2 = Thread(target = priceClass.candleUpdater, args = (tradeInfo,))
-thread3 = Thread(target = signalGenerator, args = (tradeInfo, priceClass, newTickBool))
-
-
+thread1 = Thread(target = priceClass.candleUpdater, args = (tradeInfo,))
+thread2 = Thread(target = priceClass.currentPrice, args = (tradeInfo, priceClass, eventQueue))
+thread3 = Thread(target = signalGenerator, args = (tradeInfo, priceClass, eventQueue))
 
 
 thread1.start()
+time.sleep(10)
 thread2.start()
-
-time.sleep(5)
 thread3.start()
 
