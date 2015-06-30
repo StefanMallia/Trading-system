@@ -7,14 +7,8 @@ from threading import Thread
 from pricedownloader import priceStream, priceHistoryCount, requestPrice
 import winsound
 
-#Note that it is not a good idea to run several trading strategies on the same account due to
-#position reductions from long/short trades (e.g. shorting 1 unit while a 2 unit long exists
-#will result in a 1 unit long trade.
-#Use sub accounts for multiple strategies
 
 
-#reimplement open trade tracker and just ignore if there are
-#reduced or closed trades
 
 class EventQueue: #required to guarantee that ticks are used sequentially
     def __init__(self):
@@ -24,10 +18,18 @@ class EventQueue: #required to guarantee that ticks are used sequentially
     def dequeue(self):
         self.queue.pop(0)
 
+class PriceFeeder:
+    def __init__(self):
+        self.data = priceHistoryCount(tradeInfo, count = '5000')['candles']#ommit last candle as it would not have closed yet
+
+    def feedPrice(eventQueue):
+        for line in data:
+        
+
     
 
 def signalGenerator(tradeInfo, priceClass, eventQueue):
-   #should implement mid prices
+    #should implement mid prices
     q_sma = 20
     s_sma = 50
     
@@ -92,7 +94,7 @@ def signalGenerator(tradeInfo, priceClass, eventQueue):
              
         time.sleep(0.2)      
 
-         
+             
 
 
 def orderRequest(tradeInfo, buy_or_sell, units):
@@ -285,14 +287,14 @@ eventQueue = EventQueue()
 tradeInfo =  TradeInfo('fxpractice.oanda.com',\
                        '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
                        '3566119', 'EUR_USD', 'S5')
-
-thread1 = Thread(target = priceClass.candleUpdater, args = (tradeInfo,))
-thread2 = Thread(target = priceClass.currentPrice, args = (tradeInfo, priceClass, eventQueue))
-thread3 = Thread(target = signalGenerator, args = (tradeInfo, priceClass, eventQueue))
-
-
-thread1.start()
-time.sleep(10)
-thread2.start()
-thread3.start()
+##
+##thread1 = Thread(target = priceClass.candleUpdater, args = (tradeInfo,))
+##thread2 = Thread(target = priceClass.currentPrice, args = (tradeInfo, priceClass, eventQueue))
+##thread3 = Thread(target = signalGenerator, args = (tradeInfo, priceClass, eventQueue))
+##
+##
+##thread1.start()
+##time.sleep(10)
+##thread2.start()
+##thread3.start()
 
