@@ -140,41 +140,37 @@ def updatePriceHistory(tradeInfo):
             break
 
     
-    
-def main():
 
-    tradeInfo =  TradeInfo('fxpractice.oanda.com',\
-                           '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
-                           '3566119', "EUR_USD", 'S5')
-    #domain, access_token, account_id, instrument_string, granularity
 
-        
-    #data = priceHistory("2009-01-10T00%3A00%3A00", tradeInfo)
-    #updatePriceHistory(tradeInfo)
+tradeInfo =  TradeInfo('fxpractice.oanda.com',\
+                       '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
+                       '3566119', "EUR_USD", 'S5')
+#domain, access_token, account_id, instrument_string, granularity
 
     
-    #thread1 = Thread(target = priceStream, args = (tradeInfo))
-    #thread2 = Thread(target = hello)
-    #thread1.start()
-
-    while(True):        
-        info = (priceHistoryCount(tradeInfo, count = '1'))
-        
-        time.sleep(0.5)
-        print(info)
+#data = priceHistory("2009-01-10T00%3A00%3A00", tradeInfo)
+#updatePriceHistory(tradeInfo)
 
 
-    #thread2.start()
-    
+#thread1 = Thread(target = priceStream, args = (tradeInfo))
+#thread2 = Thread(target = hello)
+#thread1.start()
+
+##while(True):        
+##    info = (priceHistoryCount(tradeInfo, count = '1'))
+##    
+##    time.sleep(0.5)
+##    print(info)
 
 
-    #while(True):
-        #price(tradeInfo)
-        #time.sleep(1)
+#thread2.start()
 
 
 
-if __name__ == "__main__":
-    main()
+#while(True):
+    #price(tradeInfo)
+    #time.sleep(1)
+
+
 
 
