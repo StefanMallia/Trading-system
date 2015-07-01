@@ -9,6 +9,18 @@ import winsound
 
 
 
+class TradeInfo:
+   '''
+   Account info, security to be traded, and granularity
+   '''
+
+   def __init__(self, domain, access_token, account_id, instrument_string, granularity):
+      self.domain = domain
+      self.access_token = access_token
+      self.account_id = account_id
+      self.instrument_string = instrument_string
+      self.granularity = granularity
+
 
 class EventQueue: #required to guarantee that ticks are used sequentially
     def __init__(self):
@@ -25,20 +37,20 @@ class PriceFeeder:
         self.data = priceHistory #to be later called using priceHistoryCount and split for cross validation
         #call priceHistoryCount(tradeInfo, count = '5000')['candles']
 
-    def feedPrice(eventQueue, candleStickClass):
+    def feedPrice(self, eventQueue, candleStickClass):
         for line in self.data[:100]: #The rest of the candlesticks are appended through the signalGenerator function
-            priceClass.candleUpdater(\
-                    {'time': line['time'], 'closeAsk': line['closeAsk'],\
-                     'closeBid': line['closeBid']})
+            candleStickClass.candleUpdater(\
+                    {'time': line['time'], 'ask': line['closeAsk'],\
+                     'bid': line['closeBid']})
         for line in self.data[100:]:
             
             eventQueue.enqueue(\
                 {'time': line['time'], 'ask': line['openAsk'],\
-                 'bid': self.data['openBid']})
+                 'bid': line['openBid']})
             
             eventQueue.enqueue(\
                 {'time': line['time'], 'ask': line['lowAsk'],\
-                 'bid': self.data['lowBid']})
+                 'bid': line['lowBid']})
             
             eventQueue.enqueue(\
                 {'time': line['time'], 'ask': line['highAsk'],\
@@ -46,7 +58,10 @@ class PriceFeeder:
             
             eventQueue.enqueue(\
                 {'Closing price': True, 'time': line['time'], 'ask': line['closeAsk'],\
-                 'bid': line['closeBid']})
+                 'bid': line['closeBid']}) #closing price used by signal generator to know when to append new candle
+
+        eventQueue.enqueue("Finished")
+        return
            
                 
 
@@ -57,29 +72,29 @@ class CandleSticks:
    '''
 
    def __init__(self):
-       '''
-    contains current candlestick's close prices
-    '''
-      self.time = []
-      self.ask = []
-      self.bid = []
+        '''
+        contains current candlestick's close prices
+        '''
+        self.time = []
+        self.ask = []
+        self.bid = []
       
       
    def candleUpdater(self, item):
-      self.time.append(item['time'])
-      self.ask.append(item['closeAsk'])
-      self.bid.append(item['bid'])
+        self.time.append(item['time'])
+        self.ask.append(item['ask'])
+        self.bid.append(item['bid'])
 
 
 
 class StrategyParameters:
 
-    def __init__(self):
-        self.q_sma = 20
-        self.s_sma = 50
+    def __init__(self, quick_sma, slow_sma):
+        self.q_sma = quick_sma
+        self.s_sma = slow_sma
 
 
-class OpenTradeLog:
+class TradeLog:
 
     def __init__(self):
         self.open_Trades = {}
@@ -107,33 +122,51 @@ class OpenTradeLog:
         self.closed_Trades.update({str(trade_ID):self.open_Trades[str(trade_ID)]})
         self.open_Trades.pop(str(trade_ID))
 
-        if(closed_Trades[str(trade_ID)] == 'buy'):
+        if(self.closed_Trades[str(trade_ID)] == 'buy'):
             close_price = self.current_BidPrice
 
-        elif(closed_Trades[str(trade_ID)] == 'sell'):
+        elif(self.closed_Trades[str(trade_ID)] == 'sell'):
             close_price = self.current_AskPrice
 
-        self.closed_Trades[str(trade_ID)].update({'closePrice': close_price})
+        self.closed_Trades[str(trade_ID)].update({'close_price': close_price})
 
 
     def closeAllTrades(self):
-        for trade_ID in self.open_Trades.keys():
+        open_TradesKeys = []
+        for trade_ID in self.open_Trades:#needed because dict changes size on each iteration
+            open_TradesKeys.append(trade_ID)
+
+        for trade_ID in open_TradesKeys:
             self.closed_Trades.update({trade_ID: self.open_Trades[trade_ID]})
             self.open_Trades.pop(trade_ID)
 
-            if(closed_Trades[trade_ID] == 'buy'):
+            if(self.closed_Trades[trade_ID]['BuyOrSell'] == 'buy'):
                 close_price = self.current_BidPrice
 
-            elif(closed_Trades[trade_ID] == 'sell'):
+            elif(self.closed_Trades[trade_ID]['BuyOrSell'] == 'sell'):
                 close_price = self.current_AskPrice
 
-            self.closed_Trades[trade_ID].update({'closePrice': close_price})
+            self.closed_Trades[trade_ID].update({'close_price': close_price})
+            
+
+    def calcProfit(self):
+        profit = 0
+        
+        for trade_ID in self.closed_Trades:
+            trade = self.closed_Trades[trade_ID]
+
+            if (trade['BuyOrSell'] == 'buy'):
+                profit = profit + (trade['close_price'] - trade['open_price'])*trade['units']
+            elif (trade['BuyOrSell'] == 'sell'):
+                profit = profit + (trade['open_price'] - trade['close_price'])*trade['units']
+
+        return profit
                 
 
     def modifyTrade(self, trade_ID, take_profit = None, stop_loss = None, trailing_stop = None):
-    '''
-    Take_profit and stop_loss are in terms of price while trailing_stop is in terms of pips (1 pip = 0.0001)
-    '''
+        '''
+        Take_profit and stop_loss are in terms of price while trailing_stop is in terms of pips (1 pip = 0.0001)
+        '''
         if(take_profit):
             self.open_Trades[str(trade_ID)]['take_profit'] = take_profit
 
@@ -146,10 +179,12 @@ class OpenTradeLog:
             trailing_stop_decimal = trailing_stop/10000 #converting from pips to decimal
             
             if(stop_loss == None and self.open_Trades[str(trade_ID)]['BuyOrSell'] == 'buy'):
-                self.open_Trades[str(trade_ID)]['stop_loss'] = self.current_BidPrice - trailing_stop_decimal
+                stop_loss = self.current_BidPrice - trailing_stop_decimal
+                self.open_Trades[str(trade_ID)]['stop_loss'] = stop_loss
 
             elif(stop_loss == None and self.open_Trades[str(trade_ID)]['BuyOrSell'] == 'sell'):
-                self.open_Trades[str(trade_ID)]['stop_loss'] = self.current_AskPrice + trailing_stop_decimal
+                stop_loss = self.current_AskPrice + trailing_stop_decimal
+                self.open_Trades[str(trade_ID)]['stop_loss'] = stop_loss
                 
        
             if(self.open_Trades[str(trade_ID)]['BuyOrSell'] == 'buy' and (self.current_BidPrice - stop_loss) > trailing_stop_decimal):
@@ -167,15 +202,17 @@ class OpenTradeLog:
         Check whether openTrades have hit take profit, stop loss, trailing stop
         '''
 
-        for trade_ID, trade in zip(self.open_Trades.keys(), self.open_Trades):
-            if('take_profit' in trade and trade['BuyOrSell'] == 'buy' and take_profit <= self.current_BidPrice):
+        for trade_ID in self.open_Trades:
+            trade = self.open_Trades[trade_ID]
+
+            if('take_profit' in trade and trade['BuyOrSell'] == 'buy' and trade['take_profit'] <= self.current_BidPrice):
                self.close_Trade(trade_ID)
-            elif('take_profit' in trade and trade['BuyOrSell'] == 'sell' and take_profit >= self.current_AskPrice):
+            elif('take_profit' in trade and trade['BuyOrSell'] == 'sell' and trade['take_profit'] >= self.current_AskPrice):
                self.close_Trade(trade_ID)
 
-            if('stop_loss' in trade and trade['BuyOrSell'] == 'buy' and stop_loss >= self.current_BidPrice):
+            if('stop_loss' in trade and trade['BuyOrSell'] == 'buy' and trade['stop_loss'] >= self.current_BidPrice):
                self.close_Trade(trade_ID)
-            elif('stop_loss' in trade and trade['BuyOrSell'] == 'sell' and stop_loss <= self.current_AskPrice):
+            elif('stop_loss' in trade and trade['BuyOrSell'] == 'sell' and trade['stop_loss'] <= self.current_AskPrice):
                self.close_Trade(trade_ID)
 
 
@@ -197,7 +234,7 @@ class OpenTradeLog:
         
         
 
-def signalGenerator(tradeInfo, candleStickClass, eventQueue, openTradeLog, strategyParameters):
+def signalGenerator(tradeInfo, candleStickClass, eventQueue, tradeLog, strategyParameters):
     #should implement mid prices
     q_sma = strategyParameters.q_sma
     s_sma = strategyParameters.s_sma
@@ -206,57 +243,46 @@ def signalGenerator(tradeInfo, candleStickClass, eventQueue, openTradeLog, strat
     while(True):#init values
         if(eventQueue.queue):
             new_tick = eventQueue.queue[0]['ask']
-            previous_quick_sma = (new_tick + sum(candleStickClass.candlesticks[-(q_sma-1):]['ask']))/q_sma
-            previous_slow_sma = (new_tick + sum(candleStickClass.candlesticks[-(s_sma-1):]['ask']))/s_sma
+            previous_quick_sma = (new_tick + sum(candleStickClass.ask[-(q_sma-1):]))/q_sma
+            previous_slow_sma = (new_tick + sum(candleStickClass.ask[-(s_sma-1):]))/s_sma
             eventQueue.dequeue()
             break
-        time.sleep(0.2)
+
 
 
     while(True):
         if(eventQueue.queue):
+            if(eventQueue.queue[0] == 'Finished'):
+                tradeLog.closeAllTrades()
+                break
+
+            tradeLog.checkTrades()
 
             datapoint = eventQueue.queue[0]
             new_tick = datapoint['ask']
             eventQueue.dequeue()
 
-            quick_sma = (new_tick + sum(candleStickClass.candlesticks[-(q_sma-1):]['ask']))/q_sma        
-            slow_sma = (new_tick + sum(candleStickClass.candlesticks[-(s_sma-1):]['ask']))/s_sma
+            quick_sma = (new_tick + sum(candleStickClass.ask[-(q_sma-1):]))/q_sma        
+            slow_sma = (new_tick + sum(candleStickClass.ask[-(s_sma-1):]))/s_sma
 
 
 
             if(quick_sma - slow_sma > 0.00002 and previous_quick_sma - previous_slow_sma <= 0.00002):
                 #trade only when sma's crossover by a significant amount (arbitrary 0.5 pips)
 
-                trade_details = orderRequest(tradeInfo, 'buy', 100000)
-                trade_details = json.loads(trade_details)
+                trade_ID = tradeLog.openTrade('buy', 100000)
+                tradeLog.modifyTrade(trade_ID, trailing_stop = 5)
 
-                if(trade_details['tradeOpened']):
-                    modifyTrade(tradeInfo, trade_details['tradeOpened']['id'], trailingStop = 5)
-                else:
-                    print("No trade to modify")
+                print("Bought 1 unit of EUR_USD")   
 
-                print("Bought 1 unit of EUR_USD")
-                print(new_tick, '     ', "quick_sma = ", quick_sma, '    ', "slow_sma = ", slow_sma)   
-                winsound.Beep(400,500)
-                winsound.Beep(600,500)
              
                 
 
             elif(quick_sma - slow_sma < -0.000005 and previous_quick_sma - previous_slow_sma >= -0.000005):
-                trade_details = orderRequest(tradeInfo, 'sell', 100000)
-                trade_details = json.loads(trade_details)
-
-                if(trade_details['tradeOpened']):
-                    modifyTrade(tradeInfo, trade_details['tradeOpened']['id'], trailingStop = 5)
-                else:
-                    print("No trade to modify")
+                trade_ID = tradeLog.openTrade('buy', 100000)
+                tradeLog.modifyTrade(trade_ID, trailing_stop = 5)
 
                 print("Sold 1 unit of EUR_USD")
-                print(new_tick, '     ', "quick_sma = ", quick_sma, '    ', "slow_sma = ", slow_sma)
-                winsound.Beep(600,500)
-                winsound.Beep(400,500)
-
 
 
             previous_quick_sma = quick_sma
@@ -264,157 +290,35 @@ def signalGenerator(tradeInfo, candleStickClass, eventQueue, openTradeLog, strat
 
             if('Closing price' in datapoint): #New candles sticks are appended from within
                                               #signal generator to ensure that ticks and new candles are sequential
-                candleStickClass.enqueue(datapoint)
+                candleStickClass.candleUpdater(datapoint)
 
              
-        time.sleep(0.2)      
-
-             
-
-
-def orderRequest(tradeInfo, buy_or_sell, units):
-
-   endpoint = 'https://api-' + tradeInfo.domain + '/v1/accounts/' + tradeInfo.account_id + '/orders'
-
-   order_data = {'instrument': tradeInfo.instrument_string, \
-              'units': str(units), 'side': buy_or_sell, 'type': 'market'}
-
-   order_data = parse.urlencode(order_data)
-   order_data = order_data.encode('utf-8')
-
-   
-   query_params = { 'Authorization': 'Bearer ' + tradeInfo.access_token   }
 
     
-         
-   req = request.Request(endpoint, data = order_data, headers = query_params)
-   response = request.urlopen(req)
-      
-   response = response.read().decode('utf-8')
-
-   print(response, '\n')
-   return response
-
-
-
-def getOpenTrades(tradeInfo):
-   '''
-   Obtain dictionary description of all open trades specified in tradeInfo
-   '''
-
-   endpoint = 'https://api-' + tradeInfo.domain + '/v1/accounts/'\
-              + tradeInfo.account_id + '/trades?instrument=' + tradeInfo.instrument_string
-
-
-   query_params = { 'Authorization': 'Bearer ' + tradeInfo.access_token   }
-
-   req = request.Request(endpoint, headers = query_params)
-   response = request.urlopen(req)
-
-   #print(response.read().decode('utf-8'))
-   return json.loads(response.read().decode('utf-8'))
-
-
-def closeTrade(tradeinfo, tradeID):
-   '''
-   Close specified trade
-   '''
-   endpoint = 'https://api-' + tradeInfo.domain + '/v1/accounts/'\
-              + tradeInfo.account_id + '/trades/' + str(tradeID)
-
-   query_params = { 'Authorization': 'Bearer ' + tradeInfo.access_token   }
-
-      
-   req = request.Request(endpoint, headers = query_params, method='DELETE')
-   response = request.urlopen(req)
-      
-   print(response.read().decode('utf-8'), '\n')
-
-
-def closeAllTrades(tradeInfo):
-   '''
-   Close all trades of instrument specified in tradeInfo
-   '''
-#https://gist.github.com/kaito834/af2ad953e3f47a6fde42 how to DELETE with urllib
-   open_trades = getOpenTrades(tradeInfo)['trades']
-
-   for index in range(len(open_trades)):  
-      closeTrade(tradeInfo, str(open_trades[index]['id']))
-
-
-   
-   
-def modifyTrade(tradeInfo, tradeID, stopLoss = 0, takeProfit = 0, trailingStop = 0):
-   '''
-   Create a stop loss for an existing trade
-   '''
-   endpoint = 'https://api-' + tradeInfo.domain + '/v1/accounts/'\
-              + tradeInfo.account_id + '/trades/' + str(tradeID)
-
-   modify_data = {'stopLoss': str(stopLoss), \
-              'takeProfit': str(takeProfit), 'trailingStop': str(trailingStop)}
-
-   modify_data = parse.urlencode(modify_data)
-   modify_data = modify_data.encode('utf-8')
-   
-   query_params = { 'Authorization': 'Bearer ' + tradeInfo.access_token   }
-
-      
-   req = request.Request(endpoint, data = modify_data, headers = query_params, method='PATCH')
-   response = request.urlopen(req)
-      
-   print(response.read().decode('utf-8'), '\n')
 
    
 
-      
-     
 
-class TradeInfo:
-   '''
-   Account info, security to be traded, and granularity
-   '''
-
-   def __init__(self, domain, access_token, account_id, instrument_string, granularity):
-      self.domain = domain
-      self.access_token = access_token
-      self.account_id = account_id
-      self.instrument_string = instrument_string
-      self.granularity = granularity
-
-
-class TimeIncrement:
-   '''
-   Used to incremenet time to determine what the next candlestick should
-   be in the candleUpdater method in Prices class
-   '''
-   
-   def __init__(self):
-      self.relativedelta = {\
-         'S5': rd(seconds = 5), 'S10': rd(seconds = 10), 'S15': rd(seconds = 15),\
-         'S30': rd(seconds = 30), 'M1': rd(minutes = 1), 'M2': rd(minutes = 2),\
-         'M3': rd(minutes = 3), 'M4': rd(minutes = 4), 'M5': rd(minutes = 5),\
-         'M10': rd(minutes = 10), 'M15': rd(minutes = 15), 'M30': rd(minutes = 30),\
-         'H1': rd(hours = 1), 'H2': rd(hours = 2), 'H3': rd(hours = 3),\
-         'H4': rd(hours = 4), 'H6': rd(hours = 6), 'H8': rd(hours = 8), \
-         'H12': rd(hours = 12), 'D': rd(days = 1), 'W': rd(weeks = 1),\
-         'M': rd(months = 1)}   
-               
-
-
-priceClass = Prices()
-eventQueue = EventQueue()
 tradeInfo =  TradeInfo('fxpractice.oanda.com',\
                        '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
                        '3566119', 'EUR_USD', 'S5')
-##
-##thread1 = Thread(target = priceClass.candleUpdater, args = (tradeInfo,))
-##thread2 = Thread(target = priceClass.currentPrice, args = (tradeInfo, priceClass, eventQueue))
-##thread3 = Thread(target = signalGenerator, args = (tradeInfo, priceClass, eventQueue))
-##
-##
+
+candle_sticks = CandleSticks()
+eventQueue = EventQueue()
+parameters = StrategyParameters(20, 50)
+trade_log = TradeLog()
+price_feeder = PriceFeeder(priceHistoryCount(tradeInfo, count = '5000')['candles'])
+
+
+
+##thread1 = Thread(target = price_feeder.feedPrice, args = (eventQueue, candle_sticks))
+##thread2 = Thread(target = signalGenerator, args = (tradeInfo, candle_sticks, eventQueue, trade_log, parameters))
+
+price_feeder.feedPrice(eventQueue, candle_sticks)
+signalGenerator(tradeInfo, candle_sticks, eventQueue, trade_log, parameters)
+
 ##thread1.start()
 ##time.sleep(10)
 ##thread2.start()
-##thread3.start()
 
+print('Profit:', trade_log.calcProfit())
