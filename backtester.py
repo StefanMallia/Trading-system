@@ -1,11 +1,5 @@
-from urllib import request, parse
-import json
-import time
-from datetime import datetime
-from dateutil.relativedelta import relativedelta as rd
-from threading import Thread
 from pricedownloader import priceStream, priceHistoryCount, requestPrice
-import winsound
+
 
 
 
@@ -86,14 +80,6 @@ class CandleSticks:
         self.bid.append(item['bid'])
 
 
-
-class StrategyParameters:
-
-    def __init__(self, quick_sma, slow_sma):
-        self.q_sma = quick_sma
-        self.s_sma = slow_sma
-
-
 class TradeLog:
 
     def __init__(self):
@@ -103,6 +89,12 @@ class TradeLog:
         self.current_AskPrice = 0 #to be modified on each 'tick' by signalGenerator()
         self.current_BidPrice = 0
         self.trade_ID = 1000000 #initial value, to be incremented with each trade opened
+
+
+    def updatePrice(self, item):
+        self.current_AskPrice = item['ask']
+        self.current_BidPrice = item['bid']
+
 
     def openTrade(self, BuyOrSell, units):
         if(BuyOrSell == 'buy'):
@@ -122,10 +114,11 @@ class TradeLog:
         self.closed_Trades.update({str(trade_ID):self.open_Trades[str(trade_ID)]})
         self.open_Trades.pop(str(trade_ID))
 
-        if(self.closed_Trades[str(trade_ID)] == 'buy'):
+
+        if(self.closed_Trades[str(trade_ID)]['BuyOrSell'] == 'buy'):
             close_price = self.current_BidPrice
 
-        elif(self.closed_Trades[str(trade_ID)] == 'sell'):
+        elif(self.closed_Trades[str(trade_ID)]['BuyOrSell'] == 'sell'):
             close_price = self.current_AskPrice
 
         self.closed_Trades[str(trade_ID)].update({'close_price': close_price})
@@ -201,19 +194,22 @@ class TradeLog:
         '''
         Check whether openTrades have hit take profit, stop loss, trailing stop
         '''
-
+        trade_IDs = []
         for trade_ID in self.open_Trades:
+           trade_IDs.append(trade_ID) #required because dictionary changes size in the next loop
+
+        for trade_ID in trade_IDs:
             trade = self.open_Trades[trade_ID]
 
             if('take_profit' in trade and trade['BuyOrSell'] == 'buy' and trade['take_profit'] <= self.current_BidPrice):
-               self.close_Trade(trade_ID)
+               self.closeTrade(trade_ID)
             elif('take_profit' in trade and trade['BuyOrSell'] == 'sell' and trade['take_profit'] >= self.current_AskPrice):
-               self.close_Trade(trade_ID)
+               self.closeTrade(trade_ID)
 
             if('stop_loss' in trade and trade['BuyOrSell'] == 'buy' and trade['stop_loss'] >= self.current_BidPrice):
-               self.close_Trade(trade_ID)
+               self.closeTrade(trade_ID)
             elif('stop_loss' in trade and trade['BuyOrSell'] == 'sell' and trade['stop_loss'] <= self.current_AskPrice):
-               self.close_Trade(trade_ID)
+               self.closeTrade(trade_ID)
 
 
          
@@ -230,7 +226,11 @@ class TradeLog:
                     #if gap between current price and stop loss greater than trailing stop then adjust stop_loss accordingly
                 
                 
+class StrategyParameters:
 
+    def __init__(self, quick_sma, slow_sma):
+        self.q_sma = quick_sma
+        self.s_sma = slow_sma
         
         
 
@@ -256,9 +256,13 @@ def signalGenerator(tradeInfo, candleStickClass, eventQueue, tradeLog, strategyP
                 tradeLog.closeAllTrades()
                 break
 
-            tradeLog.checkTrades()
+            
 
             datapoint = eventQueue.queue[0]
+
+            tradeLog.updatePrice(datapoint)
+            tradeLog.checkTrades()
+            
             new_tick = datapoint['ask']
             eventQueue.dequeue()
 
@@ -273,7 +277,7 @@ def signalGenerator(tradeInfo, candleStickClass, eventQueue, tradeLog, strategyP
                 trade_ID = tradeLog.openTrade('buy', 100000)
                 tradeLog.modifyTrade(trade_ID, trailing_stop = 5)
 
-                print("Bought 1 unit of EUR_USD")   
+                #print("Bought 1 unit of EUR_USD")   
 
              
                 
@@ -282,7 +286,7 @@ def signalGenerator(tradeInfo, candleStickClass, eventQueue, tradeLog, strategyP
                 trade_ID = tradeLog.openTrade('buy', 100000)
                 tradeLog.modifyTrade(trade_ID, trailing_stop = 5)
 
-                print("Sold 1 unit of EUR_USD")
+                #print("Sold 1 unit of EUR_USD")
 
 
             previous_quick_sma = quick_sma
@@ -301,24 +305,18 @@ def signalGenerator(tradeInfo, candleStickClass, eventQueue, tradeLog, strategyP
 
 tradeInfo =  TradeInfo('fxpractice.oanda.com',\
                        '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
-                       '3566119', 'EUR_USD', 'S5')
+                       '3566119', 'EUR_USD', 'H1')
 
 candle_sticks = CandleSticks()
 eventQueue = EventQueue()
 parameters = StrategyParameters(20, 50)
 trade_log = TradeLog()
 price_feeder = PriceFeeder(priceHistoryCount(tradeInfo, count = '5000')['candles'])
+#minimum of 100, priceFeeder loads the first 100 data points into candlesticks
 
-
-
-##thread1 = Thread(target = price_feeder.feedPrice, args = (eventQueue, candle_sticks))
-##thread2 = Thread(target = signalGenerator, args = (tradeInfo, candle_sticks, eventQueue, trade_log, parameters))
 
 price_feeder.feedPrice(eventQueue, candle_sticks)
 signalGenerator(tradeInfo, candle_sticks, eventQueue, trade_log, parameters)
 
-##thread1.start()
-##time.sleep(10)
-##thread2.start()
 
 print('Profit:', trade_log.calcProfit())
