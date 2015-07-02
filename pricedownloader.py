@@ -142,9 +142,9 @@ def updatePriceHistory(tradeInfo):
     
 
 
-tradeInfo =  TradeInfo('fxpractice.oanda.com',\
-                       '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
-                       '3566119', "EUR_USD", 'S5')
+tradeInfo =  TradeInfo('sandbox.oanda.com',\
+                       '1594c37160f50f34b63f44485b3795d8-4b11bbf404dc5ca70c5394bcd26ae6c1',\
+                       '1234567', 'EUR_USD', 'S5')
 #domain, access_token, account_id, instrument_string, granularity
 
     
