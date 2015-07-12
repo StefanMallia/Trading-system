@@ -6,6 +6,11 @@ from dateutil.relativedelta import relativedelta as rd
 from threading import Thread
 from pricedownloader import priceStream, priceHistoryCount, requestPrice
 import winsound
+import matplotlib.pyplot as plt
+
+
+#Check that candle sticks are being appended correctly
+#on fxtrade sometimes it seems that candles sticks take a while to update
 
 #Note that it is not a good idea to run several trading strategies on the same account due to
 #position reductions from long/short trades (e.g. shorting 1 unit while a 2 unit long exists
@@ -16,7 +21,10 @@ import winsound
 #reimplement open trade tracker and just ignore if there are
 #reduced or closed trades
 
-class EventQueue: #required to guarantee that ticks are used sequentially
+class EventQueue:
+    '''
+    A FIFO queue. Required to guarantee that ticks are used sequentially. Ticks are appended from PriceFeeder and read by signalGenerator()
+    '''
     def __init__(self):
         self.queue = []
     def enqueue(self, item):
@@ -24,35 +32,52 @@ class EventQueue: #required to guarantee that ticks are used sequentially
     def dequeue(self):
         self.queue.pop(0)
 
-    
 
-def signalGenerator(tradeInfo, priceClass, eventQueue):
+
+class StrategyParameters:
+    '''
+    To be used by optimizer for easy change of parameters
+    '''
+
+    def __init__(self, quick_sma, slow_sma):
+        self.q_sma = quick_sma
+        self.s_sma = slow_sma   
+
+def signalGenerator(tradeInfo, priceClass, eventQueue, strategyParameters):
    #should implement mid prices
-    q_sma = 20
-    s_sma = 50
+    q_sma = strategyParameters.q_sma
+    s_sma = strategyParameters.s_sma
     
 
     while(True):#init values
         if(eventQueue.queue):
-            previous_quick_sma = (eventQueue.queue[0]['ask'] + sum(priceClass.askPrices[-(q_sma-1):]))/q_sma
-            previous_slow_sma = (eventQueue.queue[0]['ask'] + sum(priceClass.askPrices[-(s_sma-1):]))/s_sma
+            previous_quick_sma = (eventQueue.queue[0]['mid'] + sum(priceClass.mid_Prices[-(q_sma-1):]))/q_sma
+            previous_slow_sma = (eventQueue.queue[0]['mid'] + sum(priceClass.mid_Prices[-(s_sma-1):]))/s_sma
             eventQueue.dequeue()
             break
         time.sleep(0.2)
+
+    
 
 
     while(True):
         if(eventQueue.queue):
 
-            new_tick = eventQueue.queue[0]['ask']
+            
+
+            new_tick = eventQueue.queue[0]['mid']
             eventQueue.dequeue()
 
-            quick_sma = (new_tick + sum(priceClass.askPrices[-(q_sma-1):]))/q_sma        
-            slow_sma = (new_tick + sum(priceClass.askPrices[-(s_sma-1):]))/s_sma
+            quick_sma = (new_tick + sum(priceClass.mid_Prices[-(q_sma-1):]))/q_sma        
+            slow_sma = (new_tick + sum(priceClass.mid_Prices[-(s_sma-1):]))/s_sma
+            #print(new_tick, quick_sma, slow_sma)
 
 
 
-            if(quick_sma - slow_sma > 0.00002 and previous_quick_sma - previous_slow_sma <= 0.00002):
+
+            
+
+            if(quick_sma - slow_sma > 0 and previous_quick_sma - previous_slow_sma <= 0):
                 #trade only when sma's crossover by a significant amount (arbitrary 0.5 pips)
 
                 trade_details = orderRequest(tradeInfo, 'buy', 100000)
@@ -65,12 +90,11 @@ def signalGenerator(tradeInfo, priceClass, eventQueue):
 
                 print("Bought 1 unit of EUR_USD")
                 print(new_tick, '     ', "quick_sma = ", quick_sma, '    ', "slow_sma = ", slow_sma)   
-                winsound.Beep(400,500)
                 winsound.Beep(600,500)
              
                 
 
-            elif(quick_sma - slow_sma < -0.000005 and previous_quick_sma - previous_slow_sma >= -0.000005):
+            elif(quick_sma - slow_sma < 0 and previous_quick_sma - previous_slow_sma >= 0):
                 trade_details = orderRequest(tradeInfo, 'sell', 100000)
                 trade_details = json.loads(trade_details)
 
@@ -81,7 +105,6 @@ def signalGenerator(tradeInfo, priceClass, eventQueue):
 
                 print("Sold 1 unit of EUR_USD")
                 print(new_tick, '     ', "quick_sma = ", quick_sma, '    ', "slow_sma = ", slow_sma)
-                winsound.Beep(600,500)
                 winsound.Beep(400,500)
 
 
@@ -89,8 +112,10 @@ def signalGenerator(tradeInfo, priceClass, eventQueue):
             previous_quick_sma = quick_sma
             previous_slow_sma = slow_sma
 
-             
-        time.sleep(0.2)      
+            print('new_tick: ', new_tick, 'quick_sma: ', quick_sma)
+            print('slow_sma: ', slow_sma, '\n') 
+        time.sleep(1/(len(eventQueue.queue)+1))#sleep less when more ticks in queue
+        
 
          
 
@@ -198,43 +223,55 @@ class Prices:
    '''
 
    def __init__(self):
-      self.askPrices = []
-      self.bidPrices = []
-      self.candle_time = []
+      self.ask_Prices = []
+      self.bid_Prices = []
+      self.mid_Prices = []
+      self.candle_time = [] #string format for easy reading
+      self.datetime_candle_time = [] #datetime format for general use
+      self.time_format = '%Y-%m-%dT%H:%M:%S.%fZ'
 
       
    def candleUpdater(self, tradeInfo):
-      self.data = priceHistoryCount(tradeInfo, count = '101')['candles'][:100]#ommit last candle as it would not have closed yet
+      data = priceHistoryCount(tradeInfo, count = '101')['candles'][:100]#ommit last candle as it would not have closed yet
 
-      for line in self.data:#append one candle at a time, newer candles are at end of list
-         self.askPrices.append(line['closeAsk'])
-         self.bidPrices.append(line['closeBid'])
+      for line in data:#append one candle at a time, newer candles are at end of list
+         self.ask_Prices.append(line['closeAsk'])
+         self.bid_Prices.append(line['closeBid'])
+         self.mid_Prices.append((line['closeAsk']+line['closeBid'])/2)
          self.candle_time.append(line['time'])
+         self.datetime_candle_time.append(datetime.strptime(line['time'], self.time_format))
          
 
-      timeformat = '%Y-%m-%dT%H:%M:%S.%fZ'
       time_increment = TimeIncrement().relativedelta[tradeInfo.granularity]
+
       
-      next_candle_time = datetime.strptime(self.data[-1]['time'], timeformat) + time_increment
+      
 
       
       while(True):
-
+         next_candle_time = self.datetime_candle_time[-1] + time_increment*2
+         #last candlestick's time data marks the starting time of that candlestick
+         #so the closing time of the next candlestick should be time of previous candlestick + timeincrement*2
+          
          current_time = datetime.utcnow()#price times are in utc
          time_to_next_candle = (next_candle_time - current_time).total_seconds()
 
+         
          if(time_to_next_candle > 0):
             time.sleep(time_to_next_candle) #sleep until next candlestick is available
             
-         self.data.append(priceHistoryCount(tradeInfo, count = '2')['candles'][0])#load two candles and use first because second one has not closed yet
+         data = priceHistoryCount(tradeInfo, count = '2')['candles'][0]#load two candles and use first because second one has not closed yet
          
-         
-         if(self.data[-1] != self.data[-2]):
+         if(data['time'] != self.candle_time[-1]):
+             #print(self.data[-1], self.data[-2])
+             
             #only add new candlestick if it is distinct from previous candlestick
             #otherwise it would mean that trading is suspended
-            self.askPrices.append(self.data[-1]['closeAsk'])
-            self.bidPrices.append(self.data[-1]['closeBid'])
-            self.candle_time.append(self.data[-1]['time'])
+             self.ask_Prices.append(data['closeAsk'])
+             self.bid_Prices.append(data['closeBid'])
+             self.mid_Prices.append((data['closeAsk']+line['closeBid'])/2)
+             self.candle_time.append(data['time'])
+             self.datetime_candle_time.append(datetime.strptime(data['time'], self.time_format))
 
 
 
@@ -244,7 +281,8 @@ class Prices:
       for line in self.response:
          line = json.loads(line.decode('utf-8'))
          if 'tick' in line:
-            eventQueue.enqueue({'ask': line['tick']['ask'], 'bid': line['tick']['bid'], 'time': line['tick']['time']})
+            eventQueue.enqueue({'ask': line['tick']['ask'], 'bid': line['tick']['bid'], 'mid': (line['tick']['ask']+line['tick']['bid'])/2,
+                                'time': line['tick']['time']})
             
      
 
@@ -280,15 +318,21 @@ class TimeIncrement:
                
 
 
+account_num = input('Enter account number: ')
+api_token_key = input('Enter api token key number: ')
+
+tradeInfo =  TradeInfo('fxpractice.oanda.com',\
+                       api_token_key,\
+                       account_num, "EUR_USD", 'S5')
+
 priceClass = Prices()
 eventQueue = EventQueue()
-tradeInfo =  TradeInfo('fxpractice.oanda.com',\
-                       '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
-                       '3566119', 'EUR_USD', 'S5')
+strategyParameters = StrategyParameters(20, 50)
+
 
 thread1 = Thread(target = priceClass.candleUpdater, args = (tradeInfo,))
 thread2 = Thread(target = priceClass.currentPrice, args = (tradeInfo, priceClass, eventQueue))
-thread3 = Thread(target = signalGenerator, args = (tradeInfo, priceClass, eventQueue))
+thread3 = Thread(target = signalGenerator, args = (tradeInfo, priceClass, eventQueue, strategyParameters))
 
 
 thread1.start()

@@ -139,38 +139,14 @@ def updatePriceHistory(tradeInfo):
         if(len(new_data['candles']) != 5000):
             break
 
-    
+def main():
+    account_num = input('Enter account number: ')
+    api_token_key = input('Enter api token key number: ')
+
+    tradeInfo =  TradeInfo('fxpractice.oanda.com',\
+                           api_token_key,\
+                           account_num, "EUR_USD", 'S5')
 
 
-tradeInfo =  TradeInfo('fxpractice.oanda.com',\
-                       '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
-                       '3566119', "EUR_USD", 'S5')
-#domain, access_token, account_id, instrument_string, granularity
-
-    
-#data = priceHistory("2009-01-10T00%3A00%3A00", tradeInfo)
-#updatePriceHistory(tradeInfo)
-
-
-#thread1 = Thread(target = priceStream, args = (tradeInfo))
-#thread2 = Thread(target = hello)
-#thread1.start()
-
-##while(True):        
-##    info = (priceHistoryCount(tradeInfo, count = '1'))
-##    
-##    time.sleep(0.5)
-##    print(info)
-
-
-#thread2.start()
-
-
-
-#while(True):
-    #price(tradeInfo)
-    #time.sleep(1)
-
-
-
-
+if __name__ == "__main__":
+    main()

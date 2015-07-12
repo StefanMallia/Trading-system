@@ -1,5 +1,14 @@
 from pricedownloader import priceStream, priceHistoryCount, requestPrice
+import matplotlib.pyplot as plt
+from datetime import datetime
+import time
 
+
+#To do:
+#--Optimizer, just add for loops at the end with StrategyParameter inputs being variables. Should return parameters with best result
+#--CrossValidator, an additional for loop that divides main data set into 5 and loops through, optimizing on 4/5 and testing on 1/5
+#   Optimizer should be used for selecting parameters before live trading
+#   CrossValidator should be used for determining whether trading strategy is appropriate for live trading
 
 
 
@@ -16,7 +25,10 @@ class TradeInfo:
       self.granularity = granularity
 
 
-class EventQueue: #required to guarantee that ticks are used sequentially
+class EventQueue:
+    '''
+    A FIFO queue. Required to guarantee that ticks are used sequentially. Ticks are appended from PriceFeeder and read by signalGenerator()
+    '''
     def __init__(self):
         self.queue = []
     def enqueue(self, item):
@@ -27,6 +39,10 @@ class EventQueue: #required to guarantee that ticks are used sequentially
 
 
 class PriceFeeder:
+    '''
+    Loads data and feeds to EventQueue. Appends 'Finished' once end of data is reached.
+    Implementing as a function would probably have been more suitable
+    '''
     def __init__(self, priceHistory):
         self.data = priceHistory #to be later called using priceHistoryCount and split for cross validation
         #call priceHistoryCount(tradeInfo, count = '5000')['candles']
@@ -62,7 +78,7 @@ class PriceFeeder:
 class CandleSticks:
 
    '''
-   Stores historical prices and keeps track of current price (which are sent to EventQueue as ticks)
+   Stores historical prices
    '''
 
    def __init__(self):
@@ -81,19 +97,26 @@ class CandleSticks:
 
 
 class TradeLog:
-
+    '''
+    A class to keep track of trades opened and closed. Provides methods to open and close trades as well as
+    modify and keep track of stop losses, take profits, and trailing stops. Keeps track of current price (which are read by signalGenerator from EventQueue and
+    modified in this class on each loop of signalGenerator.
+    Calculates profit for all closed trades (Realized profit)
+    '''
     def __init__(self):
         self.open_Trades = {}
         self.closed_Trades = {}
 
         self.current_AskPrice = 0 #to be modified on each 'tick' by signalGenerator()
         self.current_BidPrice = 0
+        self.current_time = 0
         self.trade_ID = 1000000 #initial value, to be incremented with each trade opened
 
 
     def updatePrice(self, item):
         self.current_AskPrice = item['ask']
         self.current_BidPrice = item['bid']
+        self.current_time = item['time']
 
 
     def openTrade(self, BuyOrSell, units):
@@ -104,7 +127,7 @@ class TradeLog:
             open_price = self.current_BidPrice
 
 
-        self.open_Trades.update({str(self.trade_ID):{'BuyOrSell': BuyOrSell, 'units': units, 'open_price': open_price}})
+        self.open_Trades.update({str(self.trade_ID):{'BuyOrSell': BuyOrSell, 'units': units, 'open_price': open_price, 'time_opened': self.current_time}})
 
         self.trade_ID += 1
         return (self.trade_ID - 1)
@@ -122,6 +145,7 @@ class TradeLog:
             close_price = self.current_AskPrice
 
         self.closed_Trades[str(trade_ID)].update({'close_price': close_price})
+        self.closed_Trades[str(trade_ID)].update({'time_closed': self.current_time})
 
 
     def closeAllTrades(self):
@@ -140,6 +164,7 @@ class TradeLog:
                 close_price = self.current_AskPrice
 
             self.closed_Trades[trade_ID].update({'close_price': close_price})
+            self.closed_Trades[trade_ID].update({'time_closed': self.current_time})
             
 
     def calcProfit(self):
@@ -227,6 +252,9 @@ class TradeLog:
                 
                 
 class StrategyParameters:
+    '''
+    To be used by optimizer for easy change of parameters
+    '''
 
     def __init__(self, quick_sma, slow_sma):
         self.q_sma = quick_sma
@@ -235,13 +263,20 @@ class StrategyParameters:
         
 
 def signalGenerator(tradeInfo, candleStickClass, eventQueue, tradeLog, strategyParameters):
+    '''
+    Can be considered the main function that determines when to buy/sell. Loops through eventQueue and makes function calls
+    to the class methods.
+    '''
     #should implement mid prices
     q_sma = strategyParameters.q_sma
     s_sma = strategyParameters.s_sma
+
+
+
     
 
     while(True):#init values
-        if(eventQueue.queue):
+        if(eventQueue.queue and eventQueue.queue[0] != 'Finished'):
             new_tick = eventQueue.queue[0]['ask']
             previous_quick_sma = (new_tick + sum(candleStickClass.ask[-(q_sma-1):]))/q_sma
             previous_slow_sma = (new_tick + sum(candleStickClass.ask[-(s_sma-1):]))/s_sma
@@ -282,11 +317,16 @@ def signalGenerator(tradeInfo, candleStickClass, eventQueue, tradeLog, strategyP
              
                 
 
-            elif(quick_sma - slow_sma < -0.000005 and previous_quick_sma - previous_slow_sma >= -0.000005):
+            elif(quick_sma - slow_sma < -0.00002 and previous_quick_sma - previous_slow_sma >= -0.00002):
                 trade_ID = tradeLog.openTrade('buy', 100000)
                 tradeLog.modifyTrade(trade_ID, trailing_stop = 5)
 
                 #print("Sold 1 unit of EUR_USD")
+
+
+
+            
+            
 
 
             previous_quick_sma = quick_sma
@@ -299,13 +339,45 @@ def signalGenerator(tradeInfo, candleStickClass, eventQueue, tradeLog, strategyP
              
 
     
+def plotTrades(candleStickClass, tradeLog):
+    '''
+    Plotting trades from tradeLog.closed_Trade attribute as well as all historical prices
+    '''
+    time = []
+    for time_point in candleStickClass.time:
+        time.append(datetime.strptime(time_point, '%Y-%m-%dT%H:%M:%S.%fZ'))
 
+
+    time_closed = []
+    time_opened = []
+    open_price = []
+    close_price = []
+    
+
+    for trade_ID in tradeLog.closed_Trades:
+        time_closed.append(datetime.strptime(tradeLog.closed_Trades[trade_ID]['time_closed'], '%Y-%m-%dT%H:%M:%S.%fZ'))
+        time_opened.append(datetime.strptime(tradeLog.closed_Trades[trade_ID]['time_opened'], '%Y-%m-%dT%H:%M:%S.%fZ'))
+        open_price.append(tradeLog.closed_Trades[trade_ID]['open_price'])
+        close_price.append(tradeLog.closed_Trades[trade_ID]['close_price'])
+    plt.plot(time,candleStickClass.ask)
+
+    plt.hold(True)
+    plt.plot(time,candleStickClass.bid, color = 'grey')
+    open_scatter = plt.scatter(time_opened, open_price, color = 'green', marker='o')
+    plt.hold(True)
+    close_scatter = plt.scatter(time_closed, close_price, color = 'red', marker='x')
+    plt.legend((open_scatter, close_scatter), ('Open', 'Close'))
+    plt.show(True)
+    
    
 
 
+account_num = input('Enter account number: ')
+api_token_key = input('Enter api token key number: ')
+
 tradeInfo =  TradeInfo('fxpractice.oanda.com',\
-                       '1594c37160f50a34b63f44785b3795d8-4b11bbf406dc6ca70c5394bcd26ae6c6',\
-                       '3566119', 'EUR_USD', 'H1')
+                       api_token_key,\
+                       account_num, "EUR_USD", 'S5')
 
 candle_sticks = CandleSticks()
 eventQueue = EventQueue()
@@ -317,6 +389,8 @@ price_feeder = PriceFeeder(priceHistoryCount(tradeInfo, count = '5000')['candles
 
 price_feeder.feedPrice(eventQueue, candle_sticks)
 signalGenerator(tradeInfo, candle_sticks, eventQueue, trade_log, parameters)
+#plotTrades(candle_sticks, trade_log)
+
 
 
 print('Profit:', trade_log.calcProfit())
