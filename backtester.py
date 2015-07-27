@@ -262,7 +262,7 @@ def signalGenerator(tradeInfo, candles, tradeLog, q_sma, s_sma):
                                   'time': candles.time[index+1],\
                                   'closeAsk': candles.closeAsk[index], 'closeBid': candles.closeBid[index]}) #Use next candles open prices for trade execution
             tradeLog.checkTrades()
-            candles.capital[index+1] = tradeLog.calcProfit()
+            candles.profit[index+1] = tradeLog.calcProfit()
 
             quick_sma = candles.sma_dict[q_sma_key][index]
             slow_sma = candles.sma_dict[s_sma_key][index]
