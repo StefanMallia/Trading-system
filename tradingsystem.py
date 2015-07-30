@@ -55,7 +55,7 @@ def signalGenerator(tradeInfo, priceClass, eventQueue, strategyParameters):
             previous_slow_sma = (eventQueue.queue[0]['mid'] + sum(priceClass.mid_Prices[-(s_sma-1):]))/s_sma
             eventQueue.dequeue()
             break
-        time.sleep(0.2)
+
 
     
 
@@ -113,8 +113,10 @@ def signalGenerator(tradeInfo, priceClass, eventQueue, strategyParameters):
             previous_slow_sma = slow_sma
 
             print('new_tick: ', new_tick, 'quick_sma: ', quick_sma)
-            print('slow_sma: ', slow_sma, '\n') 
-        time.sleep(1/(len(eventQueue.queue)+1))#sleep less when more ticks in queue
+            print('slow_sma: ', slow_sma, '\n')
+            
+        yield datetime.utcnow() + rd(seconds = 1/(len(eventQueue.queue)+1))
+        #time.sleep()#sleep less when more ticks in queue
         
 
          
@@ -243,6 +245,7 @@ class Prices:
          
 
       time_increment = TimeIncrement().relativedelta[tradeInfo.granularity]
+      
 
       
       
@@ -253,12 +256,13 @@ class Prices:
          #last candlestick's time data marks the starting time of that candlestick
          #so the closing time of the next candlestick should be time of previous candlestick + timeincrement*2
           
-         current_time = datetime.utcnow()#price times are in utc
-         time_to_next_candle = (next_candle_time - current_time).total_seconds()
+         #current_time = datetime.utcnow()#price times are in utc
+         #time_to_next_candle = (next_candle_time - current_time).total_seconds()
 
-         
-         if(time_to_next_candle > 0):
-            time.sleep(time_to_next_candle) #sleep until next candlestick is available
+         yield next_candle_time
+
+         #if(time_to_next_candle > 0):
+            #time.sleep(time_to_next_candle) #sleep until next candlestick is available
             
          data = priceHistoryCount(tradeInfo, count = '2')['candles'][0]#load two candles and use first because second one has not closed yet
          
@@ -275,6 +279,7 @@ class Prices:
 
 
 
+
    def currentPrice(self, tradeInfo, priceClass, eventQueue):
       self.response = priceStream(tradeInfo)
    
@@ -283,6 +288,9 @@ class Prices:
          if 'tick' in line:
             eventQueue.enqueue({'ask': line['tick']['ask'], 'bid': line['tick']['bid'], 'mid': (line['tick']['ask']+line['tick']['bid'])/2,
                                 'time': line['tick']['time']})
+
+         yield
+
             
      
 
@@ -330,13 +338,40 @@ eventQueue = EventQueue()
 strategyParameters = StrategyParameters(20, 50)
 
 
-thread1 = Thread(target = priceClass.candleUpdater, args = (tradeInfo,))
-thread2 = Thread(target = priceClass.currentPrice, args = (tradeInfo, priceClass, eventQueue))
-thread3 = Thread(target = signalGenerator, args = (tradeInfo, priceClass, eventQueue, strategyParameters))
+def main():
+     
+     
+     update_candle = priceClass.candleUpdater(tradeInfo)
+     current_price = priceClass.currentPrice(tradeInfo, priceClass, eventQueue)
+     signal_generator = signalGenerator(tradeInfo, priceClass, eventQueue, strategyParameters)
+
+    #update_candle and signal_generator yield the datetime value of
+    #the next execution time
 
 
-thread1.start()
-time.sleep(10)
-thread2.start()
-thread3.start()
+     candle_updater_sleep = datetime.utcnow()#initial values for condition statement
+     signal_generator_sleep = datetime.utcnow()
+
+     while True:
+         current_time = datetime.utcnow()
+         if current_time > candle_updater_sleep:
+             candle_updater_sleep = next(update_candle)
+         else:
+             pass
+
+         next(current_price)
+         
+         current_time = datetime.utcnow()
+         if current_time > candle_updater_sleep:
+             signal_generator_sleep = next(signal_generator)
+         else:
+             pass
+
+            
+
+
+
+
+if __name__ == "__main__":
+    main()
 
